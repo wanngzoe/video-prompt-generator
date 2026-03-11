@@ -1,0 +1,8 @@
+# API依赖
+google-generativeai>=0.8.0  # Gemini
+openai>=1.0.0  # OpenAI
+anthropic>=0.25.0  # Claude
+dashscope>=1.14.0  # 阿里云万相
+
+# Streamlit
+streamlit>=1.30.0
