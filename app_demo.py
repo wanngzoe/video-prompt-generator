@@ -1134,6 +1134,8 @@ elif tab_mode == "手动生成视频":
             st.error("请输入视频提示词")
         elif not video_api_key:
             st.error("请先配置视频生成API Key")
+        elif not ref_images and not ref_video:
+            st.error("请至少上传一张参考图片或一个参考视频（Wan2.6需要参考素材）")
         else:
             with st.spinner("视频生成中，请稍候..."):
                 try:
