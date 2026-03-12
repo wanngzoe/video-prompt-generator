@@ -125,6 +125,10 @@ def build_system_prompt(scheme, video_duration, change_elements, highlight, num_
 
 请仔细分析用户提供的参考视频，将其转换为详细的结构化文字描述，并分析视频为何吸引人点击。
 
+## ⚠️ 重要：输出格式要求
+
+**你必须严格按照以下JSON格式输出，不要输出任何其他内容！**
+
 ## 视频规格
 
 - 参考视频：1个
