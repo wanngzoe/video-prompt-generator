@@ -530,7 +530,7 @@ st.sidebar.title("⚙️ 配置")
 # Tab切换：配置 / 生成 / 优化
 tab_mode = st.sidebar.radio(
     "模式",
-    ["配置", "生成提示词", "优化提示词", "生成视频"],
+    ["配置", "生成提示词", "优化提示词", "手动生成视频"],
     index=1
 )
 
@@ -1051,125 +1051,179 @@ elif tab_mode == "优化提示词":
         if st.button("📋 复制提示词", key="copy_optimized"):
             st.toast("已复制到剪贴板")
 
-# ==================== 模式：生成视频 ====================
-elif tab_mode == "生成视频":
-    st.header("🎬 视频生成")
+# ==================== 模式：手动生成视频 ====================
+elif tab_mode == "手动生成视频":
+    st.header("🎬 手动生成视频")
 
-    # 检查是否有选中的提示词
-    if 'selected_prompt_for_video' not in st.session_state:
-        st.warning("请先在「生成提示词」页面生成并选择提示词")
-    else:
-        # 获取选中的提示词
-        selected_prompt = st.session_state.selected_prompt_for_video
-        st.info(f"已选择提示词：{selected_prompt['title']}")
-        st.code(selected_prompt['prompt'][:300] + "..." if len(selected_prompt['prompt']) > 300 else selected_prompt['prompt'])
+    # 手动输入提示词
+    manual_prompt = st.text_area(
+        "输入视频提示词",
+        placeholder="请输入视频生成提示词，如：一只可爱的小猫在草地上奔跑...",
+        height=150,
+        key="manual_prompt_input"
+    )
 
+    st.markdown("---")
+
+    # 上传参考素材
+    st.subheader("📎 参考素材（可选）")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        # 参考图片
+        ref_images = st.file_uploader(
+            "上传参考图片",
+            type=['png', 'jpg', 'jpeg', 'webp'],
+            accept_multiple_files=True,
+            key="ref_images_uploader"
+        )
+
+    with col2:
+        # 参考视频
+        ref_video = st.file_uploader(
+            "上传参考视频",
+            type=['mp4', 'mov', 'avi'],
+            accept_multiple_files=False,
+            key="ref_video_uploader"
+        )
+
+    # 显示已上传的素材
+    if ref_images:
+        st.success(f"已上传 {len(ref_images)} 张参考图片")
+    if ref_video:
+        st.success(f"已上传参考视频: {ref_video.name}")
+
+    st.markdown("---")
+
+    # 视频生成参数
+    st.subheader("⚙️ 生成参数")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        output_duration = st.number_input(
+            "生成长度（秒）",
+            min_value=4,
+            max_value=15,
+            value=5,
+            key="manual_output_duration"
+        )
+    with col2:
+        output_quality = st.selectbox(
+            "输出质量",
+            ["720p", "1080p"],
+            index=0,
+            key="manual_output_quality"
+        )
+
+    # 分辨率映射
+    resolution_map = {
+        "720p": "1280*720",
+        "1080p": "1920*1080"
+    }
+
+    # 生成按钮
+    st.markdown("---")
+
+    if st.button("🎬 生成视频", type="primary", use_container_width=True, key="manual_generate_video_btn"):
+        if not manual_prompt:
+            st.error("请输入视频提示词")
+        elif not video_api_key:
+            st.error("请先配置视频生成API Key")
+        else:
+            with st.spinner("视频生成中，请稍候..."):
+                try:
+                    # 处理参考图片
+                    ref_image_paths = []
+                    if ref_images:
+                        for img in ref_images:
+                            # 保存上传的图片到临时文件
+                            import tempfile
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{img.name}") as tmp:
+                                tmp.write(img.getvalue())
+                                ref_image_paths.append(tmp.name)
+
+                    # 处理参考视频
+                    ref_video_path = None
+                    if ref_video:
+                        import tempfile
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{ref_video.name}") as tmp:
+                            tmp.write(ref_video.getvalue())
+                            ref_video_path = tmp.name
+
+                    # 调用API生成视频
+                    result = call_video_api(
+                        provider=video_model_provider,
+                        api_key=video_api_key,
+                        prompt=manual_prompt,
+                        reference_video_path=ref_video_path,
+                        reference_images=ref_image_paths if ref_image_paths else None,
+                        duration=output_duration,
+                        resolution=resolution_map[output_quality]
+                    )
+
+                    if result.get("status") == "error":
+                        st.error(f"生成失败: {result.get('error')}")
+                    else:
+                        st.session_state.video_task_id = result.get("task_id")
+                        st.session_state.video_result = result
+
+                        # 显示进度
+                        progress_bar = st.progress(0.0)
+                        status_text = st.empty()
+
+                        # 轮询获取结果
+                        max_retries = 60
+                        for i in range(max_retries):
+                            status_text.text(f"等待视频生成... ({i+1}/{max_retries})")
+                            progress_bar.progress((i + 1) / max_retries)
+
+                            # 检查结果
+                            if st.session_state.video_task_id:
+                                result = get_video_result(
+                                    provider=video_model_provider,
+                                    api_key=video_api_key,
+                                    task_id=st.session_state.video_task_id
+                                )
+
+                                if result.get("status") == "completed":
+                                    progress_bar.progress(1.0)
+                                    status_text.text("✅ 视频生成完成！")
+                                    st.session_state.video_result = result
+                                    break
+                                elif result.get("status") == "failed":
+                                    progress_bar.progress(0.0)
+                                    status_text.text(f"❌ 生成失败: {result.get('error')}")
+                                    break
+
+                            time.sleep(2)
+
+                        if result.get("status") == "completed":
+                            st.success("✅ 视频生成完成！")
+                        else:
+                            st.info("⏳ 视频正在后台生成，可稍后刷新查看结果")
+
+                except Exception as e:
+                    st.error(f"生成失败: {str(e)}")
+
+    # 显示生成结果
+    if st.session_state.get('video_result'):
         st.markdown("---")
+        st.header("📹 生成结果")
 
-        # 视频生成参数
+        result = st.session_state.video_result
         col1, col2 = st.columns(2)
         with col1:
-            output_duration = st.number_input(
-                "生成长度（秒）",
-                min_value=4,
-                max_value=15,
-                value=min(selected_prompt['duration'], 15),
-                key="output_duration"
-            )
+            st.metric("状态", result.get("status", "unknown"))
         with col2:
-            output_quality = st.selectbox(
-                "输出质量",
-                ["720p", "1080p"],
-                index=0,
-                key="output_quality"
-            )
+            st.metric("耗时", f"{result.get('duration', 'N/A')}秒")
 
-        # 分辨率映射
-        resolution_map = {
-            "720p": "1280*720",
-            "1080p": "1920*1080"
-        }
+        if result.get("video_url"):
+            st.video(result["video_url"])
+            st.markdown(f"**视频链接**: [点击下载]({result['video_url']})")
 
-        # 生成按钮
-        st.markdown("---")
-        use_real_video_api = st.checkbox("使用真实API调用", value=True, key="use_real_video_api")
-
-        if st.button("🎬 生成视频", type="primary", use_container_width=True, key="generate_video_btn"):
-            if use_real_video_api and not video_api_key:
-                st.error("请先配置视频生成API Key")
-            else:
-                with st.spinner("视频生成中，请稍候..."):
-                    try:
-                        # 调用API生成视频
-                        result = call_video_api(
-                            provider=video_model_provider,
-                            api_key=video_api_key,
-                            prompt=selected_prompt['prompt'],
-                            reference_video_path=st.session_state.get('video_file_path'),
-                            reference_images=st.session_state.get('image_file_paths'),
-                            duration=output_duration,
-                            resolution=resolution_map[output_quality]
-                        )
-
-                        if result.get("status") == "error":
-                            st.error(f"生成失败: {result.get('error')}")
-                        else:
-                            st.session_state.video_task_id = result.get("task_id")
-                            st.session_state.video_result = result
-
-                            # 显示进度
-                            progress_bar = st.progress(0.0)
-                            status_text = st.empty()
-
-                            # 轮询获取结果
-                            max_retries = 30
-                            for i in range(max_retries):
-                                status_text.text(f"等待视频生成... ({i+1}/{max_retries})")
-                                progress_bar.progress((i + 1) / max_retries)
-
-                                # 检查结果
-                                if st.session_state.video_task_id:
-                                    result = get_video_result(
-                                        provider=video_model_provider,
-                                        api_key=video_api_key,
-                                        task_id=st.session_state.video_task_id
-                                    )
-
-                                    if result.get("status") == "completed":
-                                        progress_bar.progress(1.0)
-                                        status_text.text("✅ 视频生成完成！")
-                                        st.session_state.video_result = result
-                                        break
-                                    elif result.get("status") == "failed":
-                                        progress_bar.progress(0.0)
-                                        status_text.text(f"❌ 生成失败: {result.get('error')}")
-                                        break
-
-                                time.sleep(2)
-
-                            st.success("✅ 视频生成任务已提交！")
-
-                    except Exception as e:
-                        st.error(f"生成失败: {str(e)}")
-
-        # 显示生成结果
-        if st.session_state.video_result:
-            st.markdown("---")
-            st.header("📹 生成结果")
-
-            result = st.session_state.video_result
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("状态", result.get("status", "unknown"))
-            with col2:
-                st.metric("耗时", f"{result.get('duration', 'N/A')}秒")
-
-            if result.get("video_url"):
-                st.video(result["video_url"])
-                st.markdown(f"**视频链接**: [点击下载]({result['video_url']})")
-
-            if result.get("error"):
-                st.error(f"错误信息: {result['error']}")
+        if result.get("error"):
+            st.error(f"错误信息: {result['error']}")
 
 # ==================== 模式：配置 ====================
 else:
